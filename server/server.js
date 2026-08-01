@@ -16,9 +16,13 @@ require("dotenv").config();
 const app = require("./src/app");
 const { PORT, NODE_ENV } = require("./src/config/env");
 const { startCleanupService } = require("./src/services/cleanup.service");
+const { getLocalIPAddress } = require("./src/utils/network");
 
 const server = app.listen(PORT, () => {
+  const lanIp = getLocalIPAddress();
   console.log(`[server] running in ${NODE_ENV} mode on port ${PORT}`);
+  console.log(`[server] Local URL:   http://localhost:${PORT}`);
+  console.log(`[server] Network LAN: http://${lanIp}:${PORT}`);
   startCleanupService();
 });
 

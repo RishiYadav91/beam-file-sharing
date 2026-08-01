@@ -13,7 +13,7 @@
 
 module.exports = {
   NODE_ENV: process.env.NODE_ENV || "development",
-  PORT: parseInt(process.env.PORT, 10) || 5000,
+  PORT: parseInt(process.env.PORT, 10) || 8000,
 
   // Origin the frontend is served from, used by the CORS middleware.
   CLIENT_URL: process.env.CLIENT_URL || "http://localhost:5173",
@@ -24,4 +24,5 @@ module.exports = {
   MAX_FILE_SIZE_MB: parseInt(process.env.MAX_FILE_SIZE_MB, 10) || 2048,
   FILE_EXPIRY_HOURS: parseInt(process.env.FILE_EXPIRY_HOURS, 10) || 24,
   CLEANUP_INTERVAL_MINUTES: parseInt(process.env.CLEANUP_INTERVAL_MINUTES, 10) || 5,
+  HOST: process.env.HOST || null,
 };

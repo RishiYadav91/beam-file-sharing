@@ -7,7 +7,7 @@
 
 import axios from "axios";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/api";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000/api";
 
 /**
  * Uploads a file to the backend API with real-time progress updates.
@@ -49,7 +49,7 @@ export async function uploadFile(file, onProgress, signal) {
       throw new Error(message);
     } else if (error.request) {
       // Request was made but no response received (Backend offline or network error)
-      throw new Error("Unable to connect to backend server. Please verify the server is running at http://localhost:5000.");
+      throw new Error("Unable to connect to backend server. Please verify the server is running at http://localhost:8000.");
     } else {
       // Something else triggered the error
       throw new Error(error.message || "An unexpected error occurred during upload.");

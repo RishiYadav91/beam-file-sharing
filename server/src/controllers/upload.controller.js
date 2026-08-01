@@ -5,8 +5,8 @@
  */
 
 const fs = require("fs").promises;
-const { PORT } = require("../config/env");
 const { saveFileMetadata } = require("../services/file.service");
+const { buildDownloadUrl } = require("../utils/network");
 
 const MULTIPART_HEADER = "multipart/form-data";
 
@@ -47,10 +47,9 @@ async function uploadFile(req, res, next) {
     // 4. Save metadata to in-memory store
     const metadata = saveFileMetadata(req.file);
 
-    // 5. Construct download URL
-    const host = req.get("host") || `localhost:${PORT}`;
+    // 5. Construct LAN download URL via utility builder
     const protocol = req.protocol || "http";
-    const downloadUrl = `${protocol}://${host}/api/download/${metadata.fileId}`;
+    const downloadUrl = buildDownloadUrl(metadata.fileId, protocol);
 
     // 6. Return HTTP 201 response per specification
     return res.status(201).json({

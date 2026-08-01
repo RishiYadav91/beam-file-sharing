@@ -16,10 +16,10 @@ npm run dev      # nodemon, restarts on file change
 npm start        # plain node
 ```
 
-Server boots on `http://localhost:5000` by default. Confirm it's alive:
+Server boots on `http://localhost:8000` by default. Confirm it's alive:
 
 ```bash
-curl http://localhost:5000/api/health
+curl http://localhost:8000/api/health
 ```
 
 ## Folder structure
