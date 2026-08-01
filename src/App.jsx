@@ -1,0 +1,527 @@
+import React, { useState, useCallback, useRef, useEffect } from "react";
+import {
+  UploadCloud,
+  File as FileIcon,
+  X,
+  Check,
+  Copy,
+  Sun,
+  Moon,
+  RadioTower,
+  Loader2,
+  RotateCcw,
+} from "lucide-react";
+
+/* ---------------------------------------------------------
+   Fonts — Space Grotesk (display), Inter (body), JetBrains
+   Mono (data / filenames / progress readouts).
+--------------------------------------------------------- */
+const FontLoader = () => (
+  <style>{`
+    @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+    @keyframes scanline {
+      0% { transform: translateY(-100%); opacity: 0; }
+      10% { opacity: 1; }
+      90% { opacity: 1; }
+      100% { transform: translateY(2000%); opacity: 0; }
+    }
+    .scanline {
+      animation: scanline 1.8s linear infinite;
+    }
+    @keyframes riseIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .rise-in {
+      animation: riseIn 0.4s ease-out both;
+    }
+  `}</style>
+);
+
+const fontDisplay = { fontFamily: "'Space Grotesk', sans-serif" };
+const fontBody = { fontFamily: "'Inter', sans-serif" };
+const fontMono = { fontFamily: "'JetBrains Mono', monospace" };
+
+/* ---------------------------------------------------------
+   Theme tokens — dark is the default identity; light is a
+   clean neutral fallback, not a cream/terracotta re-skin.
+--------------------------------------------------------- */
+const themes = {
+  dark: {
+    page: "bg-zinc-950",
+    panel: "bg-zinc-900",
+    panelAlt: "bg-zinc-800/60",
+    border: "border-zinc-800",
+    borderStrong: "border-zinc-700",
+    text: "text-zinc-100",
+    textMuted: "text-zinc-500",
+    textSubtle: "text-zinc-400",
+    accent: "text-amber-400",
+    accentBg: "bg-amber-400",
+    accentBgSoft: "bg-amber-400/10",
+    accentBorder: "border-amber-400/40",
+    ring: "ring-amber-400/30",
+    signal: "text-cyan-400",
+    signalBg: "bg-cyan-400",
+    dropIdle: "border-zinc-700",
+    dropHover: "border-amber-400 bg-amber-400/5",
+  },
+  light: {
+    page: "bg-zinc-50",
+    panel: "bg-white",
+    panelAlt: "bg-zinc-100",
+    border: "border-zinc-200",
+    borderStrong: "border-zinc-300",
+    text: "text-zinc-900",
+    textMuted: "text-zinc-500",
+    textSubtle: "text-zinc-600",
+    accent: "text-amber-600",
+    accentBg: "bg-amber-500",
+    accentBgSoft: "bg-amber-500/10",
+    accentBorder: "border-amber-500/40",
+    ring: "ring-amber-500/30",
+    signal: "text-cyan-600",
+    signalBg: "bg-cyan-500",
+    dropIdle: "border-zinc-300",
+    dropHover: "border-amber-500 bg-amber-500/5",
+  },
+};
+
+function formatBytes(bytes) {
+  if (bytes === 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
+/* ---------------------------------------------------------
+   Deterministic pseudo-QR generator (design purposes only —
+   no network call). Produces a stable module grid from a
+   seed string, with real finder-pattern eyes.
+--------------------------------------------------------- */
+function seededRandom(seed) {
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) {
+    h = (Math.imul(31, h) + seed.charCodeAt(i)) | 0;
+  }
+  return function () {
+    h = (Math.imul(h ^ (h >>> 15), 1 | h) + 0x6d2b79f5) | 0;
+    let t = Math.imul(h ^ (h >>> 7), 61 | h);
+    t = (t + Math.imul(t ^ (t >>> 14), 2246822519)) ^ 0;
+    return ((t >>> 0) % 1000) / 1000;
+  };
+}
+
+function buildQrGrid(seed, size = 25) {
+  const rand = seededRandom(seed);
+  const grid = Array.from({ length: size }, () => Array(size).fill(false));
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      grid[y][x] = rand() > 0.56;
+    }
+  }
+  const eye = [
+    [1, 1, 1, 1, 1, 1, 1],
+    [1, 0, 0, 0, 0, 0, 1],
+    [1, 0, 1, 1, 1, 0, 1],
+    [1, 0, 1, 1, 1, 0, 1],
+    [1, 0, 1, 1, 1, 0, 1],
+    [1, 0, 0, 0, 0, 0, 1],
+    [1, 1, 1, 1, 1, 1, 1],
+  ];
+  const placeEye = (ox, oy) => {
+    for (let y = 0; y < 7; y++) {
+      for (let x = 0; x < 7; x++) {
+        grid[oy + y][ox + x] = eye[y][x] === 1;
+      }
+    }
+  };
+  placeEye(0, 0);
+  placeEye(size - 7, 0);
+  placeEye(0, size - 7);
+  return grid;
+}
+
+function QrCode({ seed, accentClass }) {
+  const size = 25;
+  const grid = buildQrGrid(seed, size);
+  const cell = 8;
+  const dim = size * cell;
+  return (
+    <svg
+      viewBox={`0 0 ${dim} ${dim}`}
+      width="100%"
+      height="100%"
+      role="img"
+      aria-label="QR code for file transfer link"
+    >
+      <rect width={dim} height={dim} className="fill-current text-transparent" />
+      {grid.map((row, y) =>
+        row.map(
+          (on, x) =>
+            on && (
+              <rect
+                key={`${x}-${y}`}
+                x={x * cell}
+                y={y * cell}
+                width={cell}
+                height={cell}
+                rx={1}
+                className={`fill-current ${accentClass}`}
+              />
+            )
+        )
+      )}
+    </svg>
+  );
+}
+
+/* ---------------------------------------------------------
+   Header
+--------------------------------------------------------- */
+function Header({ theme, dark, onToggleDark }) {
+  return (
+    <header className="flex items-center justify-between mb-10">
+      <div className="flex items-center gap-2.5">
+        <div
+          className={`w-8 h-8 rounded-md ${theme.accentBgSoft} border ${theme.accentBorder} flex items-center justify-center`}
+        >
+          <RadioTower className={`w-4 h-4 ${theme.accent}`} strokeWidth={2} />
+        </div>
+        <span
+          className={`text-lg tracking-tight ${theme.text}`}
+          style={{ ...fontDisplay, fontWeight: 600 }}
+        >
+          beam
+        </span>
+      </div>
+      <button
+        onClick={onToggleDark}
+        aria-label="Toggle dark mode"
+        className={`w-9 h-9 rounded-md border ${theme.border} ${theme.panelAlt} flex items-center justify-center hover:${theme.borderStrong} transition-colors`}
+      >
+        {dark ? (
+          <Sun className={`w-4 h-4 ${theme.textSubtle}`} />
+        ) : (
+          <Moon className={`w-4 h-4 ${theme.textSubtle}`} />
+        )}
+      </button>
+    </header>
+  );
+}
+
+/* ---------------------------------------------------------
+   DropZone
+--------------------------------------------------------- */
+function DropZone({ theme, onFile }) {
+  const [hover, setHover] = useState(false);
+  const inputRef = useRef(null);
+
+  const handleDrop = useCallback(
+    (e) => {
+      e.preventDefault();
+      setHover(false);
+      const f = e.dataTransfer.files?.[0];
+      if (f) onFile(f);
+    },
+    [onFile]
+  );
+
+  return (
+    <div
+      onDragOver={(e) => {
+        e.preventDefault();
+        setHover(true);
+      }}
+      onDragLeave={() => setHover(false)}
+      onDrop={handleDrop}
+      onClick={() => inputRef.current?.click()}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => e.key === "Enter" && inputRef.current?.click()}
+      className={`relative overflow-hidden cursor-pointer rounded-xl border-2 border-dashed ${hover ? theme.dropHover : theme.dropIdle
+        } transition-colors duration-150 flex flex-col items-center justify-center text-center px-6 py-14 sm:py-16`}
+    >
+      {hover && (
+        <div
+          className={`scanline absolute left-0 right-0 h-px ${theme.accentBg} opacity-70`}
+        />
+      )}
+      <input
+        ref={inputRef}
+        type="file"
+        className="hidden"
+        onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])}
+      />
+      <div
+        className={`w-12 h-12 rounded-full ${theme.panelAlt} border ${theme.border} flex items-center justify-center mb-4`}
+      >
+        <UploadCloud className={`w-5 h-5 ${theme.textSubtle}`} strokeWidth={1.75} />
+      </div>
+      <p className={`text-sm ${theme.text}`} style={fontBody}>
+        <span className={`${theme.accent} font-medium`}>Drop a file</span> here or click to
+        browse
+      </p>
+      <p className={`text-xs ${theme.textMuted} mt-1.5`} style={fontMono}>
+        max 2 GB · any file type
+      </p>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------
+   FilePreview
+--------------------------------------------------------- */
+function FilePreview({ theme, file, onRemove, disabled }) {
+  return (
+    <div
+      className={`rise-in flex items-center gap-3 rounded-lg border ${theme.border} ${theme.panelAlt} px-4 py-3`}
+    >
+      <div
+        className={`w-9 h-9 shrink-0 rounded-md ${theme.panel} border ${theme.border} flex items-center justify-center`}
+      >
+        <FileIcon className={`w-4 h-4 ${theme.textSubtle}`} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className={`text-sm truncate ${theme.text}`} style={fontBody}>
+          {file.name}
+        </p>
+        <p className={`text-xs ${theme.textMuted}`} style={fontMono}>
+          {formatBytes(file.size)}
+        </p>
+      </div>
+      {!disabled && (
+        <button
+          onClick={onRemove}
+          aria-label="Remove file"
+          className={`shrink-0 w-7 h-7 rounded-md flex items-center justify-center ${theme.textMuted} hover:${theme.text} hover:${theme.panel} transition-colors`}
+        >
+          <X className="w-3.5 h-3.5" />
+        </button>
+      )}
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------
+   ProgressBar
+--------------------------------------------------------- */
+function ProgressBar({ theme, progress }) {
+  return (
+    <div className="rise-in">
+      <div className="flex items-center justify-between mb-2">
+        <span className={`text-xs ${theme.textSubtle}`} style={fontBody}>
+          Transmitting…
+        </span>
+        <span className={`text-xs ${theme.accent}`} style={fontMono}>
+          {Math.round(progress)}%
+        </span>
+      </div>
+      <div className={`h-1.5 w-full rounded-full ${theme.panelAlt} overflow-hidden`}>
+        <div
+          className={`h-full rounded-full ${theme.accentBg} transition-[width] duration-150 ease-out`}
+          style={{ width: `${progress}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------
+   UploadButton
+--------------------------------------------------------- */
+function UploadButton({ theme, onClick, status }) {
+  const uploading = status === "uploading";
+  return (
+    <button
+      onClick={onClick}
+      disabled={uploading}
+      className={`w-full rounded-lg ${theme.accentBg} text-zinc-950 text-sm py-3 flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.99] transition disabled:opacity-60`}
+      style={{ ...fontBody, fontWeight: 600 }}
+    >
+      {uploading ? (
+        <>
+          <Loader2 className="w-4 h-4 animate-spin" />
+          Sending
+        </>
+      ) : (
+        <>
+          <RadioTower className="w-4 h-4" />
+          Send file
+        </>
+      )}
+    </button>
+  );
+}
+
+/* ---------------------------------------------------------
+   ResultPanel — QR + signal-ring signature
+--------------------------------------------------------- */
+function ResultPanel({ theme, file, link, onReset }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
+      setCopied(false);
+    }
+  };
+
+  return (
+    <div className="rise-in flex flex-col items-center text-center">
+      <div className="relative w-48 h-48 sm:w-52 sm:h-52 flex items-center justify-center mb-6">
+        <span
+          className={`absolute inset-0 rounded-2xl border ${theme.accentBorder} animate-ping opacity-40`}
+          style={{ animationDuration: "2.2s" }}
+        />
+        <span
+          className={`absolute inset-3 rounded-2xl border ${theme.accentBorder} animate-ping opacity-30`}
+          style={{ animationDuration: "2.2s", animationDelay: "0.4s" }}
+        />
+        <div
+          className={`relative w-full h-full rounded-2xl ${theme.panel} border ${theme.border} p-4`}
+        >
+          <QrCode seed={link} accentClass={theme.text} />
+        </div>
+      </div>
+
+      <p className={`text-sm ${theme.text} mb-1`} style={fontBody}>
+        Scan to receive
+      </p>
+      <p className={`text-xs ${theme.textMuted} mb-5 truncate max-w-full`} style={fontMono}>
+        {file.name}
+      </p>
+
+      <div
+        className={`w-full flex items-center gap-2 rounded-lg border ${theme.border} ${theme.panelAlt} px-3 py-2.5 mb-3`}
+      >
+        <span className={`flex-1 text-xs truncate text-left ${theme.textSubtle}`} style={fontMono}>
+          {link}
+        </span>
+        <button
+          onClick={handleCopy}
+          aria-label="Copy link"
+          className={`shrink-0 w-7 h-7 rounded-md flex items-center justify-center ${theme.textMuted} hover:${theme.text} transition-colors`}
+        >
+          {copied ? (
+            <Check className={`w-3.5 h-3.5 ${theme.signal}`} />
+          ) : (
+            <Copy className="w-3.5 h-3.5" />
+          )}
+        </button>
+      </div>
+
+      <button
+        onClick={onReset}
+        className={`text-xs flex items-center gap-1.5 ${theme.textMuted} hover:${theme.text} transition-colors`}
+        style={fontBody}
+      >
+        <RotateCcw className="w-3.5 h-3.5" />
+        Send another file
+      </button>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------
+   Footer
+--------------------------------------------------------- */
+function Footer({ theme }) {
+  return (
+    <p className={`text-center text-xs ${theme.textMuted} mt-10`} style={fontMono}>
+      transfers stay on your network · nothing is stored
+    </p>
+  );
+}
+
+/* ---------------------------------------------------------
+   App
+--------------------------------------------------------- */
+export default function App() {
+  const [dark, setDark] = useState(true);
+  const theme = dark ? themes.dark : themes.light;
+
+  const [file, setFile] = useState(null);
+  const [status, setStatus] = useState("idle"); // idle | uploading | done
+  const [progress, setProgress] = useState(0);
+  const [link, setLink] = useState("");
+  const intervalRef = useRef(null);
+
+  const handleFile = (f) => {
+    setFile(f);
+    setStatus("idle");
+    setProgress(0);
+  };
+
+  const handleUpload = () => {
+    if (!file) return;
+    setStatus("uploading");
+    setProgress(0);
+
+    intervalRef.current = setInterval(() => {
+      setProgress((p) => {
+        const next = p + Math.random() * 18 + 6;
+        if (next >= 100) {
+          clearInterval(intervalRef.current);
+          const id = Math.random().toString(36).slice(2, 8);
+          setLink(`https://beam.link/t/${id}`);
+          setTimeout(() => setStatus("done"), 250);
+          return 100;
+        }
+        return next;
+      });
+    }, 260);
+  };
+
+  const handleReset = () => {
+    clearInterval(intervalRef.current);
+    setFile(null);
+    setStatus("idle");
+    setProgress(0);
+    setLink("");
+  };
+
+  useEffect(() => () => clearInterval(intervalRef.current), []);
+
+  return (
+    <div className={`min-h-screen w-full ${theme.page} transition-colors duration-200`}>
+      <FontLoader />
+      <div className="max-w-md mx-auto px-5 py-12 sm:py-16">
+        <Header theme={theme} dark={dark} onToggleDark={() => setDark((d) => !d)} />
+
+        <div
+          className={`rounded-2xl border ${theme.border} ${theme.panel} p-5 sm:p-7 shadow-sm`}
+        >
+          {status === "done" ? (
+            <ResultPanel theme={theme} file={file} link={link} onReset={handleReset} />
+          ) : (
+            <div className="flex flex-col gap-4">
+              {!file ? (
+                <DropZone theme={theme} onFile={handleFile} />
+              ) : (
+                <FilePreview
+                  theme={theme}
+                  file={file}
+                  disabled={status === "uploading"}
+                  onRemove={handleReset}
+                />
+              )}
+
+              {status === "uploading" && <ProgressBar theme={theme} progress={progress} />}
+
+              {file && (
+                <UploadButton theme={theme} status={status} onClick={handleUpload} />
+              )}
+            </div>
+          )}
+        </div>
+
+        <Footer theme={theme} />
+      </div>
+    </div>
+  );
+}

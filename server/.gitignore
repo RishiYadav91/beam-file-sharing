@@ -1,0 +1,7 @@
+node_modules/
+.env
+npm-debug.log*
+
+# Uploaded files should never be committed; keep the folder via .gitkeep
+uploads/*
+!uploads/.gitkeep
