@@ -83,9 +83,28 @@ function getSecureFilePath(storedFilename) {
   return targetPath;
 }
 
+/**
+ * Retrieve all file metadata records in memory.
+ * @returns {Array<Object>}
+ */
+function getAllFileMetadata() {
+  return Array.from(fileMap.values());
+}
+
+/**
+ * Remove file metadata record by ID from memory.
+ * @param {string} fileId
+ * @returns {boolean}
+ */
+function removeFileMetadata(fileId) {
+  return fileMap.delete(fileId);
+}
+
 module.exports = {
   saveFileMetadata,
   getFileMetadata,
+  getAllFileMetadata,
+  removeFileMetadata,
   isFileExpired,
   getSecureFilePath,
 };

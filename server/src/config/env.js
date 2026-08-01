@@ -23,4 +23,5 @@ module.exports = {
   UPLOAD_DIR: process.env.UPLOAD_DIR || "uploads",
   MAX_FILE_SIZE_MB: parseInt(process.env.MAX_FILE_SIZE_MB, 10) || 2048,
   FILE_EXPIRY_HOURS: parseInt(process.env.FILE_EXPIRY_HOURS, 10) || 24,
+  CLEANUP_INTERVAL_MINUTES: parseInt(process.env.CLEANUP_INTERVAL_MINUTES, 10) || 5,
 };

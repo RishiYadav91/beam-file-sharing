@@ -15,9 +15,11 @@ require("dotenv").config();
 
 const app = require("./src/app");
 const { PORT, NODE_ENV } = require("./src/config/env");
+const { startCleanupService } = require("./src/services/cleanup.service");
 
 const server = app.listen(PORT, () => {
   console.log(`[server] running in ${NODE_ENV} mode on port ${PORT}`);
+  startCleanupService();
 });
 
 // Fail loudly instead of leaving the process in a half-alive state.
