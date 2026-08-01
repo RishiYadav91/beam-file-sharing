@@ -16,6 +16,7 @@ require("dotenv").config();
 const app = require("./src/app");
 const { PORT, NODE_ENV } = require("./src/config/env");
 const { startCleanupService } = require("./src/services/cleanup.service");
+const { initSocketService } = require("./src/services/socket.service");
 const { getLocalIPAddress } = require("./src/utils/network");
 
 const server = app.listen(PORT, () => {
@@ -25,6 +26,11 @@ const server = app.listen(PORT, () => {
   console.log(`[server] Network LAN: http://${lanIp}:${PORT}`);
   startCleanupService();
 });
+
+// Attach Socket.IO to this same HTTP server instance — no second
+// server is created, it just listens for the 'upgrade' event on
+// the one app.listen() already returned.
+initSocketService(server);
 
 // Fail loudly instead of leaving the process in a half-alive state.
 process.on("unhandledRejection", (err) => {

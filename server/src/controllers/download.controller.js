@@ -10,6 +10,13 @@ const {
   isFileExpired,
   getSecureFilePath,
 } = require("../services/file.service");
+const {
+  notifyReceiverConnected,
+  notifyDownloadStarted,
+  notifyDownloadProgress,
+  notifyDownloadCompleted,
+  notifyReceiverDisconnected,
+} = require("../services/socket.service");
 
 function downloadFile(req, res, next) {
   try {
@@ -30,6 +37,9 @@ function downloadFile(req, res, next) {
         message: "File not found",
       });
     }
+
+    // A real receiver device has opened a valid download link.
+    notifyReceiverConnected(fileId);
 
     // 2. Expiry check (HTTP 410 Gone)
     if (isFileExpired(metadata)) {
@@ -56,12 +66,51 @@ function downloadFile(req, res, next) {
       });
     }
 
-    // 5. Serve file download using original filename
-    return res.download(filePath, metadata.originalFilename, (err) => {
-      if (err && !res.headersSent) {
-        next(err);
+    // 5. Serve file download using original filename.
+    // Streamed manually (rather than res.download()) so we can track
+    // bytes-sent against the known file size and emit live progress.
+    res.setHeader("Content-Length", metadata.size);
+    res.attachment(metadata.originalFilename); // sets Content-Disposition + Content-Type
+
+    notifyDownloadStarted(fileId);
+
+    let bytesSent = 0;
+    let lastPercent = -1;
+    const readStream = fs.createReadStream(filePath);
+
+    readStream.on("data", (chunk) => {
+      bytesSent += chunk.length;
+      const percent =
+        metadata.size > 0 ? Math.min(100, Math.floor((bytesSent / metadata.size) * 100)) : 100;
+      if (percent !== lastPercent) {
+        lastPercent = percent;
+        notifyDownloadProgress(fileId, percent);
       }
     });
+
+    readStream.on("error", (err) => {
+      if (!res.headersSent) next(err);
+      // If headers were already sent, the 'close' handler below
+      // covers notifying the uploader of the dropped connection.
+    });
+
+    // Fires only when the full response was successfully flushed —
+    // the reliable signal for "the receiver actually got the file".
+    res.on("finish", () => {
+      notifyDownloadCompleted(fileId);
+    });
+
+    // Fires whenever the connection closes, whether that's after a
+    // normal finish or because the receiver disconnected mid-stream.
+    // Checking writableEnded distinguishes the two so completion and
+    // disconnect are never both reported for the same transfer.
+    res.on("close", () => {
+      if (!res.writableEnded) {
+        notifyReceiverDisconnected(fileId);
+      }
+    });
+
+    return readStream.pipe(res);
   } catch (err) {
     next(err);
   }

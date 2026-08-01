@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { uploadFile } from "./services/uploadService";
 import TransferQrCode from "./components/QrCode";
+import { useTransferStatus, TRANSFER_STATUS } from "./hooks/useTransferStatus";
 
 /* ---------------------------------------------------------
    Fonts — Space Grotesk (display), Inter (body), JetBrains
@@ -282,6 +283,11 @@ function UploadButton({ theme, onClick, status }) {
 function ResultPanel({ theme, file, uploadData, onReset, dark }) {
   const [copied, setCopied] = useState(false);
   const link = uploadData?.downloadUrl || "";
+  const { status, progress, connected } = useTransferStatus(uploadData?.fileId);
+  const statusLabel =
+    status === TRANSFER_STATUS.DOWNLOADING && typeof progress === "number"
+      ? `${TRANSFER_STATUS.DOWNLOADING} ${progress}%`
+      : status;
   const formattedExpiry = uploadData?.expiresAt
     ? new Date(uploadData.expiresAt).toLocaleString()
     : null;
@@ -313,6 +319,20 @@ function ResultPanel({ theme, file, uploadData, onReset, dark }) {
           <TransferQrCode value={link} dark={dark} />
         </div>
       </div>
+
+      <div className="flex items-center justify-center gap-1.5 mb-1" aria-live="polite">
+        <span
+          className={`w-1.5 h-1.5 rounded-full ${theme.signalBg} ${
+            status !== TRANSFER_STATUS.COMPLETE ? "animate-pulse" : ""
+          }`}
+        />
+        <span className={`text-xs ${theme.textSubtle}`} style={fontMono}>
+          {statusLabel}
+        </span>
+      </div>
+      <p className={`text-[11px] ${theme.textMuted} mb-4`} style={fontMono}>
+        {connected ? "🟢 Connected" : "🔴 Disconnected"}
+      </p>
 
       <p className={`text-sm ${theme.text} mb-1`} style={fontBody}>
         Scan to receive
