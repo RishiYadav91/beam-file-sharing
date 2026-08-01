@@ -10,7 +10,10 @@ import {
   RadioTower,
   Loader2,
   RotateCcw,
+  AlertCircle,
 } from "lucide-react";
+import { uploadFile } from "./services/uploadService";
+import TransferQrCode from "./components/QrCode";
 
 /* ---------------------------------------------------------
    Fonts — Space Grotesk (display), Inter (body), JetBrains
@@ -93,88 +96,6 @@ function formatBytes(bytes) {
   const units = ["B", "KB", "MB", "GB"];
   const i = Math.floor(Math.log(bytes) / Math.log(1024));
   return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
-}
-
-/* ---------------------------------------------------------
-   Deterministic pseudo-QR generator (design purposes only —
-   no network call). Produces a stable module grid from a
-   seed string, with real finder-pattern eyes.
---------------------------------------------------------- */
-function seededRandom(seed) {
-  let h = 0;
-  for (let i = 0; i < seed.length; i++) {
-    h = (Math.imul(31, h) + seed.charCodeAt(i)) | 0;
-  }
-  return function () {
-    h = (Math.imul(h ^ (h >>> 15), 1 | h) + 0x6d2b79f5) | 0;
-    let t = Math.imul(h ^ (h >>> 7), 61 | h);
-    t = (t + Math.imul(t ^ (t >>> 14), 2246822519)) ^ 0;
-    return ((t >>> 0) % 1000) / 1000;
-  };
-}
-
-function buildQrGrid(seed, size = 25) {
-  const rand = seededRandom(seed);
-  const grid = Array.from({ length: size }, () => Array(size).fill(false));
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      grid[y][x] = rand() > 0.56;
-    }
-  }
-  const eye = [
-    [1, 1, 1, 1, 1, 1, 1],
-    [1, 0, 0, 0, 0, 0, 1],
-    [1, 0, 1, 1, 1, 0, 1],
-    [1, 0, 1, 1, 1, 0, 1],
-    [1, 0, 1, 1, 1, 0, 1],
-    [1, 0, 0, 0, 0, 0, 1],
-    [1, 1, 1, 1, 1, 1, 1],
-  ];
-  const placeEye = (ox, oy) => {
-    for (let y = 0; y < 7; y++) {
-      for (let x = 0; x < 7; x++) {
-        grid[oy + y][ox + x] = eye[y][x] === 1;
-      }
-    }
-  };
-  placeEye(0, 0);
-  placeEye(size - 7, 0);
-  placeEye(0, size - 7);
-  return grid;
-}
-
-function QrCode({ seed, accentClass }) {
-  const size = 25;
-  const grid = buildQrGrid(seed, size);
-  const cell = 8;
-  const dim = size * cell;
-  return (
-    <svg
-      viewBox={`0 0 ${dim} ${dim}`}
-      width="100%"
-      height="100%"
-      role="img"
-      aria-label="QR code for file transfer link"
-    >
-      <rect width={dim} height={dim} className="fill-current text-transparent" />
-      {grid.map((row, y) =>
-        row.map(
-          (on, x) =>
-            on && (
-              <rect
-                key={`${x}-${y}`}
-                x={x * cell}
-                y={y * cell}
-                width={cell}
-                height={cell}
-                rx={1}
-                className={`fill-current ${accentClass}`}
-              />
-            )
-        )
-      )}
-    </svg>
-  );
 }
 
 /* ---------------------------------------------------------
@@ -358,8 +279,12 @@ function UploadButton({ theme, onClick, status }) {
 /* ---------------------------------------------------------
    ResultPanel — QR + signal-ring signature
 --------------------------------------------------------- */
-function ResultPanel({ theme, file, link, onReset }) {
+function ResultPanel({ theme, file, uploadData, onReset, dark }) {
   const [copied, setCopied] = useState(false);
+  const link = uploadData?.downloadUrl || "";
+  const formattedExpiry = uploadData?.expiresAt
+    ? new Date(uploadData.expiresAt).toLocaleString()
+    : null;
 
   const handleCopy = async () => {
     try {
@@ -385,16 +310,21 @@ function ResultPanel({ theme, file, link, onReset }) {
         <div
           className={`relative w-full h-full rounded-2xl ${theme.panel} border ${theme.border} p-4`}
         >
-          <QrCode seed={link} accentClass={theme.text} />
+          <TransferQrCode value={link} dark={dark} />
         </div>
       </div>
 
       <p className={`text-sm ${theme.text} mb-1`} style={fontBody}>
         Scan to receive
       </p>
-      <p className={`text-xs ${theme.textMuted} mb-5 truncate max-w-full`} style={fontMono}>
-        {file.name}
+      <p className={`text-xs ${theme.textMuted} mb-1 truncate max-w-full`} style={fontMono}>
+        {uploadData?.filename || file?.name} · {formatBytes(uploadData?.size || file?.size || 0)}
       </p>
+      {formattedExpiry && (
+        <p className={`text-xs ${theme.textMuted} mb-5`} style={fontMono}>
+          Expires: {formattedExpiry}
+        </p>
+      )}
 
       <div
         className={`w-full flex items-center gap-2 rounded-lg border ${theme.border} ${theme.panelAlt} px-3 py-2.5 mb-3`}
@@ -446,46 +376,70 @@ export default function App() {
   const theme = dark ? themes.dark : themes.light;
 
   const [file, setFile] = useState(null);
-  const [status, setStatus] = useState("idle"); // idle | uploading | done
+  const [status, setStatus] = useState("idle"); // idle | uploading | done | error
   const [progress, setProgress] = useState(0);
-  const [link, setLink] = useState("");
-  const intervalRef = useRef(null);
+  const [uploadData, setUploadData] = useState(null);
+  const [errorMsg, setErrorMsg] = useState(null);
+
+  const abortControllerRef = useRef(null);
 
   const handleFile = (f) => {
     setFile(f);
     setStatus("idle");
     setProgress(0);
+    setErrorMsg(null);
   };
 
-  const handleUpload = () => {
+  const handleUpload = async () => {
     if (!file) return;
+
     setStatus("uploading");
     setProgress(0);
+    setErrorMsg(null);
 
-    intervalRef.current = setInterval(() => {
-      setProgress((p) => {
-        const next = p + Math.random() * 18 + 6;
-        if (next >= 100) {
-          clearInterval(intervalRef.current);
-          const id = Math.random().toString(36).slice(2, 8);
-          setLink(`https://beam.link/t/${id}`);
-          setTimeout(() => setStatus("done"), 250);
-          return 100;
-        }
-        return next;
-      });
-    }, 260);
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    try {
+      const data = await uploadFile(
+        file,
+        (percent) => {
+          setProgress(percent);
+        },
+        controller.signal
+      );
+
+      setUploadData(data);
+      setStatus("done");
+    } catch (err) {
+      if (!err.isCancelled) {
+        setErrorMsg(err.message || "Upload failed. Please try again.");
+        setStatus("error");
+      }
+    } finally {
+      abortControllerRef.current = null;
+    }
   };
 
   const handleReset = () => {
-    clearInterval(intervalRef.current);
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
     setFile(null);
     setStatus("idle");
     setProgress(0);
-    setLink("");
+    setUploadData(null);
+    setErrorMsg(null);
   };
 
-  useEffect(() => () => clearInterval(intervalRef.current), []);
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
 
   return (
     <div className={`min-h-screen w-full ${theme.page} transition-colors duration-200`}>
@@ -497,7 +451,7 @@ export default function App() {
           className={`rounded-2xl border ${theme.border} ${theme.panel} p-5 sm:p-7 shadow-sm`}
         >
           {status === "done" ? (
-            <ResultPanel theme={theme} file={file} link={link} onReset={handleReset} />
+            <ResultPanel theme={theme} file={file} uploadData={uploadData} onReset={handleReset} dark={dark} />
           ) : (
             <div className="flex flex-col gap-4">
               {!file ? (
@@ -509,6 +463,25 @@ export default function App() {
                   disabled={status === "uploading"}
                   onRemove={handleReset}
                 />
+              )}
+
+              {errorMsg && (
+                <div
+                  className={`rise-in rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-400 flex items-center justify-between gap-2`}
+                  style={fontBody}
+                >
+                  <div className="flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span>{errorMsg}</span>
+                  </div>
+                  <button
+                    onClick={() => setErrorMsg(null)}
+                    aria-label="Dismiss error"
+                    className="shrink-0 text-red-400 hover:text-red-300"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               )}
 
               {status === "uploading" && <ProgressBar theme={theme} progress={progress} />}

@@ -10,11 +10,12 @@
  * - size (bytes)
  * - mimetype
  * - uploadTimestamp
- * - expiryTimestamp (24 hours after upload)
+ * - expiryTimestamp (configurable via FILE_EXPIRY_HOURS)
  */
 
+const path = require("path");
 const { v4: uuidv4 } = require("uuid");
-const { FILE_EXPIRY_HOURS } = require("../config/env");
+const { FILE_EXPIRY_HOURS, UPLOAD_DIR } = require("../config/env");
 
 const MS_PER_HOUR = 60 * 60 * 1000;
 
@@ -47,7 +48,7 @@ function saveFileMetadata(file) {
 }
 
 /**
- * Retrieve file metadata by ID (for future use / verification).
+ * Retrieve file metadata by ID.
  * @param {string} fileId
  * @returns {Object|null}
  */
@@ -55,7 +56,36 @@ function getFileMetadata(fileId) {
   return fileMap.get(fileId) || null;
 }
 
+/**
+ * Check if file metadata has passed its expiration time.
+ * @param {Object} metadata
+ * @returns {boolean}
+ */
+function isFileExpired(metadata) {
+  if (!metadata || !metadata.expiryTimestamp) return true;
+  return new Date() > new Date(metadata.expiryTimestamp);
+}
+
+/**
+ * Resolves physical file path and verifies no path traversal occurred.
+ * @param {string} storedFilename
+ * @returns {string|null} Resolved absolute path or null if invalid
+ */
+function getSecureFilePath(storedFilename) {
+  if (!storedFilename) return null;
+  const uploadDirResolved = path.resolve(__dirname, "..", "..", UPLOAD_DIR);
+  const targetPath = path.resolve(uploadDirResolved, storedFilename);
+
+  // Security check: ensure path resides strictly within UPLOAD_DIR
+  if (!targetPath.startsWith(uploadDirResolved)) {
+    return null;
+  }
+  return targetPath;
+}
+
 module.exports = {
   saveFileMetadata,
   getFileMetadata,
+  isFileExpired,
+  getSecureFilePath,
 };

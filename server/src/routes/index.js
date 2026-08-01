@@ -10,11 +10,13 @@
 const express = require("express");
 const healthRoutes = require("./health.routes");
 const uploadRoutes = require("./upload.routes");
+const downloadRoutes = require("./download.routes");
 
 const router = express.Router();
 
 router.use(healthRoutes);
 router.use(uploadRoutes);
+router.use(downloadRoutes);
 
 module.exports = router;
 
