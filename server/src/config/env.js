@@ -26,4 +26,8 @@ module.exports = {
   FILE_EXPIRY_HOURS: parseInt(process.env.FILE_EXPIRY_HOURS, 10) || 24,
   CLEANUP_INTERVAL_MINUTES: parseInt(process.env.CLEANUP_INTERVAL_MINUTES, 10) || 5,
   HOST: process.env.HOST || null,
+
+  // UDP port used for LAN device discovery broadcasts (Milestone 10).
+  DISCOVERY_PORT: parseInt(process.env.DISCOVERY_PORT, 10) || 41234,
+  APP_VERSION: process.env.APP_VERSION || "1.0.0",
 };

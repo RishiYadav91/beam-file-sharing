@@ -17,6 +17,7 @@ import {
 import { uploadFiles } from "./services/uploadService";
 import TransferQrCode from "./components/QrCode";
 import { useTransferStatus, TRANSFER_STATUS } from "./hooks/useTransferStatus";
+import NearbyDevices from "./components/NearbyDevices";
 
 /* ---------------------------------------------------------
    Fonts — Space Grotesk (display), Inter (body), JetBrains
@@ -577,6 +578,8 @@ export default function App() {
             </div>
           )}
         </div>
+
+        <NearbyDevices theme={theme} />
 
         <Footer theme={theme} />
       </div>

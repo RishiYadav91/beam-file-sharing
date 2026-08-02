@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getSocket, joinTransfer, disconnectSocket, peekSocket } from "../services/socketService";
+import { acquireSocket, joinTransfer, releaseSocket, peekSocket } from "../services/socketService";
 
 /**
  * hooks/useTransferStatus.js
@@ -54,7 +54,7 @@ export function useTransferStatus(fileId) {
   useEffect(() => {
     if (!fileId) return undefined;
 
-    const socket = getSocket();
+    const socket = acquireSocket();
     joinTransfer(fileId);
 
     const handleReceiverConnected = () => setStatus(TRANSFER_STATUS.CONNECTED);
@@ -102,7 +102,7 @@ export function useTransferStatus(fileId) {
       socket.off(EVENTS.RECEIVER_DISCONNECTED, handleReceiverDisconnected);
       socket.off("connect", handleSocketConnect);
       socket.off("disconnect", handleSocketDisconnect);
-      disconnectSocket();
+      releaseSocket();
     };
   }, [fileId]);
 

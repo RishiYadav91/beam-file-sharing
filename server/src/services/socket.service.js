@@ -100,6 +100,20 @@ function notifyReceiverDisconnected(fileId) {
   emitToUploader(fileId, EVENTS.RECEIVER_DISCONNECTED);
 }
 
+/**
+ * Pushes the current nearby-device list to every connected client —
+ * unlike the transfer notify* helpers above, this isn't scoped to a
+ * room, since discovery is global rather than per-transfer. Called
+ * from server.js's wiring, fed by discovery.service.js's onUpdate
+ * callback; this file never imports discovery.service.js directly,
+ * keeping the two services mutually unaware of each other.
+ * @param {Array<Object>} devices
+ */
+function broadcastDeviceList(devices) {
+  if (!io) return;
+  io.emit("discovery:devices", devices);
+}
+
 module.exports = {
   initSocketService,
   notifyReceiverConnected,
@@ -107,4 +121,5 @@ module.exports = {
   notifyDownloadProgress,
   notifyDownloadCompleted,
   notifyReceiverDisconnected,
+  broadcastDeviceList,
 };
