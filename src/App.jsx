@@ -2,6 +2,8 @@ import React, { useState, useCallback, useRef, useEffect } from "react";
 import {
   UploadCloud,
   File as FileIcon,
+  Folder,
+  Package,
   X,
   Check,
   Copy,
@@ -12,7 +14,7 @@ import {
   RotateCcw,
   AlertCircle,
 } from "lucide-react";
-import { uploadFile } from "./services/uploadService";
+import { uploadFiles } from "./services/uploadService";
 import TransferQrCode from "./components/QrCode";
 import { useTransferStatus, TRANSFER_STATUS } from "./hooks/useTransferStatus";
 
@@ -99,6 +101,28 @@ function formatBytes(bytes) {
   return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
+/**
+ * Derives a friendlier label + icon for the current selection than a
+ * bare file count:
+ *  - a folder upload shows the folder's name (from webkitRelativePath)
+ *  - a plain multi-file selection shows a generic "Transfer" label
+ *  - a single file shows its own filename, as before
+ */
+function getTransferLabel(files) {
+  if (!files || files.length === 0) return { icon: FileIcon, label: "" };
+
+  if (files.length === 1) {
+    return { icon: FileIcon, label: files[0].name };
+  }
+
+  const rootFolder = files[0].webkitRelativePath?.split("/")[0];
+  if (rootFolder) {
+    return { icon: Folder, label: rootFolder };
+  }
+
+  return { icon: Package, label: "Transfer" };
+}
+
 /* ---------------------------------------------------------
    Header
 --------------------------------------------------------- */
@@ -136,18 +160,21 @@ function Header({ theme, dark, onToggleDark }) {
 /* ---------------------------------------------------------
    DropZone
 --------------------------------------------------------- */
-function DropZone({ theme, onFile }) {
+function DropZone({ theme, onFiles }) {
   const [hover, setHover] = useState(false);
   const inputRef = useRef(null);
+  const folderInputRef = useRef(null);
 
   const handleDrop = useCallback(
     (e) => {
       e.preventDefault();
       setHover(false);
-      const f = e.dataTransfer.files?.[0];
-      if (f) onFile(f);
+      // Drag-and-drop is scoped to files (not recursive folder
+      // traversal, which needs the separate webkitGetAsEntry API) —
+      // folder uploads go through the dedicated picker below.
+      if (e.dataTransfer.files?.length) onFiles(e.dataTransfer.files);
     },
-    [onFile]
+    [onFiles]
   );
 
   return (
@@ -173,8 +200,18 @@ function DropZone({ theme, onFile }) {
       <input
         ref={inputRef}
         type="file"
+        multiple
         className="hidden"
-        onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])}
+        onChange={(e) => e.target.files?.length && onFiles(e.target.files)}
+      />
+      <input
+        ref={folderInputRef}
+        type="file"
+        webkitdirectory=""
+        directory=""
+        multiple
+        className="hidden"
+        onChange={(e) => e.target.files?.length && onFiles(e.target.files)}
       />
       <div
         className={`w-12 h-12 rounded-full ${theme.panelAlt} border ${theme.border} flex items-center justify-center mb-4`}
@@ -182,9 +219,20 @@ function DropZone({ theme, onFile }) {
         <UploadCloud className={`w-5 h-5 ${theme.textSubtle}`} strokeWidth={1.75} />
       </div>
       <p className={`text-sm ${theme.text}`} style={fontBody}>
-        <span className={`${theme.accent} font-medium`}>Drop a file</span> here or click to
+        <span className={`${theme.accent} font-medium`}>Drop files</span> here or click to
         browse
       </p>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          folderInputRef.current?.click();
+        }}
+        className={`text-xs ${theme.accent} mt-2 underline underline-offset-2 hover:opacity-80 transition-opacity`}
+        style={fontBody}
+      >
+        or select a folder
+      </button>
       <p className={`text-xs ${theme.textMuted} mt-1.5`} style={fontMono}>
         max 2 GB · any file type
       </p>
@@ -193,9 +241,12 @@ function DropZone({ theme, onFile }) {
 }
 
 /* ---------------------------------------------------------
-   FilePreview
+   FilePreview — summary of the current selection
 --------------------------------------------------------- */
-function FilePreview({ theme, file, onRemove, disabled }) {
+function FilePreview({ theme, files, onRemove, disabled }) {
+  const totalSize = files.reduce((sum, f) => sum + f.size, 0);
+  const { icon: Icon, label } = getTransferLabel(files);
+
   return (
     <div
       className={`rise-in flex items-center gap-3 rounded-lg border ${theme.border} ${theme.panelAlt} px-4 py-3`}
@@ -203,20 +254,20 @@ function FilePreview({ theme, file, onRemove, disabled }) {
       <div
         className={`w-9 h-9 shrink-0 rounded-md ${theme.panel} border ${theme.border} flex items-center justify-center`}
       >
-        <FileIcon className={`w-4 h-4 ${theme.textSubtle}`} />
+        <Icon className={`w-4 h-4 ${theme.textSubtle}`} />
       </div>
       <div className="min-w-0 flex-1">
         <p className={`text-sm truncate ${theme.text}`} style={fontBody}>
-          {file.name}
+          {label}
         </p>
         <p className={`text-xs ${theme.textMuted}`} style={fontMono}>
-          {formatBytes(file.size)}
+          {files.length} {files.length === 1 ? "file" : "files"} · {formatBytes(totalSize)}
         </p>
       </div>
       {!disabled && (
         <button
           onClick={onRemove}
-          aria-label="Remove file"
+          aria-label="Remove selection"
           className={`shrink-0 w-7 h-7 rounded-md flex items-center justify-center ${theme.textMuted} hover:${theme.text} hover:${theme.panel} transition-colors`}
         >
           <X className="w-3.5 h-3.5" />
@@ -270,7 +321,7 @@ function UploadButton({ theme, onClick, status }) {
       ) : (
         <>
           <RadioTower className="w-4 h-4" />
-          Send file
+          Send
         </>
       )}
     </button>
@@ -280,10 +331,10 @@ function UploadButton({ theme, onClick, status }) {
 /* ---------------------------------------------------------
    ResultPanel — QR + signal-ring signature
 --------------------------------------------------------- */
-function ResultPanel({ theme, file, uploadData, onReset, dark }) {
+function ResultPanel({ theme, files, uploadData, onReset, dark }) {
   const [copied, setCopied] = useState(false);
   const link = uploadData?.downloadUrl || "";
-  const { status, progress, connected } = useTransferStatus(uploadData?.fileId);
+  const { status, progress, connected } = useTransferStatus(uploadData?.transferId);
   const statusLabel =
     status === TRANSFER_STATUS.DOWNLOADING && typeof progress === "number"
       ? `${TRANSFER_STATUS.DOWNLOADING} ${progress}%`
@@ -291,6 +342,8 @@ function ResultPanel({ theme, file, uploadData, onReset, dark }) {
   const formattedExpiry = uploadData?.expiresAt
     ? new Date(uploadData.expiresAt).toLocaleString()
     : null;
+  const totalFiles = uploadData?.totalFiles ?? files?.length ?? 0;
+  const totalSize = uploadData?.totalSize ?? files?.reduce((sum, f) => sum + f.size, 0) ?? 0;
 
   const handleCopy = async () => {
     try {
@@ -337,8 +390,20 @@ function ResultPanel({ theme, file, uploadData, onReset, dark }) {
       <p className={`text-sm ${theme.text} mb-1`} style={fontBody}>
         Scan to receive
       </p>
+      {(() => {
+        const { icon: Icon, label } = getTransferLabel(files);
+        return label ? (
+          <p
+            className={`flex items-center justify-center gap-1.5 text-sm ${theme.text} mb-1 truncate max-w-full`}
+            style={fontBody}
+          >
+            <Icon className={`w-3.5 h-3.5 shrink-0 ${theme.textSubtle}`} />
+            <span className="truncate">{label}</span>
+          </p>
+        ) : null;
+      })()}
       <p className={`text-xs ${theme.textMuted} mb-1 truncate max-w-full`} style={fontMono}>
-        {uploadData?.filename || file?.name} · {formatBytes(uploadData?.size || file?.size || 0)}
+        {totalFiles} {totalFiles === 1 ? "file" : "files"} · {formatBytes(totalSize)}
       </p>
       {formattedExpiry && (
         <p className={`text-xs ${theme.textMuted} mb-5`} style={fontMono}>
@@ -395,7 +460,7 @@ export default function App() {
   const [dark, setDark] = useState(true);
   const theme = dark ? themes.dark : themes.light;
 
-  const [file, setFile] = useState(null);
+  const [files, setFiles] = useState([]);
   const [status, setStatus] = useState("idle"); // idle | uploading | done | error
   const [progress, setProgress] = useState(0);
   const [uploadData, setUploadData] = useState(null);
@@ -403,15 +468,15 @@ export default function App() {
 
   const abortControllerRef = useRef(null);
 
-  const handleFile = (f) => {
-    setFile(f);
+  const handleFiles = (fileList) => {
+    setFiles(Array.from(fileList));
     setStatus("idle");
     setProgress(0);
     setErrorMsg(null);
   };
 
   const handleUpload = async () => {
-    if (!file) return;
+    if (files.length === 0) return;
 
     setStatus("uploading");
     setProgress(0);
@@ -421,8 +486,8 @@ export default function App() {
     abortControllerRef.current = controller;
 
     try {
-      const data = await uploadFile(
-        file,
+      const data = await uploadFiles(
+        files,
         (percent) => {
           setProgress(percent);
         },
@@ -446,7 +511,7 @@ export default function App() {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
     }
-    setFile(null);
+    setFiles([]);
     setStatus("idle");
     setProgress(0);
     setUploadData(null);
@@ -471,15 +536,15 @@ export default function App() {
           className={`rounded-2xl border ${theme.border} ${theme.panel} p-5 sm:p-7 shadow-sm`}
         >
           {status === "done" ? (
-            <ResultPanel theme={theme} file={file} uploadData={uploadData} onReset={handleReset} dark={dark} />
+            <ResultPanel theme={theme} files={files} uploadData={uploadData} onReset={handleReset} dark={dark} />
           ) : (
             <div className="flex flex-col gap-4">
-              {!file ? (
-                <DropZone theme={theme} onFile={handleFile} />
+              {files.length === 0 ? (
+                <DropZone theme={theme} onFiles={handleFiles} />
               ) : (
                 <FilePreview
                   theme={theme}
-                  file={file}
+                  files={files}
                   disabled={status === "uploading"}
                   onRemove={handleReset}
                 />
@@ -506,7 +571,7 @@ export default function App() {
 
               {status === "uploading" && <ProgressBar theme={theme} progress={progress} />}
 
-              {file && (
+              {files.length > 0 && (
                 <UploadButton theme={theme} status={status} onClick={handleUpload} />
               )}
             </div>

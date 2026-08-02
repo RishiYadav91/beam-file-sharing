@@ -25,9 +25,13 @@ const fileMap = new Map();
 /**
  * Save file metadata to in-memory store.
  * @param {Object} file - Express/Multer file object
+ * @param {string} [relativePath] - Folder-relative path (e.g. from a
+ *   webkitdirectory selection), sent separately from the file itself
+ *   because multer/busboy always strips any "/" out of file.originalname
+ *   for security — the raw filename field can never carry a path.
  * @returns {Object} Stored file record metadata
  */
-function saveFileMetadata(file) {
+function saveFileMetadata(file, relativePath) {
   const fileId = uuidv4();
   const now = new Date();
   const uploadTimestamp = now.toISOString();
@@ -36,6 +40,9 @@ function saveFileMetadata(file) {
   const metadata = {
     fileId,
     originalFilename: file.originalname,
+    // Falls back to the plain filename for non-folder uploads, where
+    // there's no folder structure to preserve.
+    relativePath: relativePath || file.originalname,
     storedFilename: file.filename,
     size: file.size,
     mimetype: file.mimetype,
@@ -100,6 +107,68 @@ function removeFileMetadata(fileId) {
   return fileMap.delete(fileId);
 }
 
+// In-memory transfer index (Milestone 9)
+const transferMap = new Map();
+
+/**
+ * Groups a set of already-saved file metadata records under one
+ * shareable transferId. Each file keeps its own row in `fileMap`
+ * (created via saveFileMetadata, unchanged above) — this is just an
+ * index on top, so cleanup's expiry sweep (which only knows about
+ * individual file records) needs no changes at all: as each file in
+ * a transfer expires and gets deleted, the transfer degrades
+ * gracefully rather than needing its own cleanup path.
+ * @param {Array<Object>} fileMetadataList - records returned by saveFileMetadata
+ * @returns {Object} { transferId, fileIds, totalFiles, totalSize, expiryTimestamp }
+ */
+function saveTransfer(fileMetadataList) {
+  const transferId = uuidv4();
+  const totalSize = fileMetadataList.reduce((sum, f) => sum + f.size, 0);
+  // All files in one request are created together, so they already
+  // share the same expiry window — reuse it rather than recomputing.
+  const { uploadTimestamp, expiryTimestamp } = fileMetadataList[0];
+
+  const transfer = {
+    transferId,
+    fileIds: fileMetadataList.map((f) => f.fileId),
+    totalFiles: fileMetadataList.length,
+    totalSize,
+    uploadTimestamp,
+    expiryTimestamp,
+  };
+
+  transferMap.set(transferId, transfer);
+  return transfer;
+}
+
+/**
+ * Retrieve a transfer's index record (not the files themselves).
+ * @param {string} transferId
+ * @returns {Object|null}
+ */
+function getTransfer(transferId) {
+  return transferMap.get(transferId) || null;
+}
+
+/**
+ * Resolves a transfer to its still-present, still-valid constituent
+ * file metadata records. Returns null if the transfer is unknown, or
+ * if ANY constituent file is missing/expired — a partial transfer
+ * isn't safely downloadable (a ZIP missing an entry, or a lone file
+ * that's already gone).
+ * @param {string} transferId
+ * @returns {Array<Object>|null}
+ */
+function getTransferFiles(transferId) {
+  const transfer = getTransfer(transferId);
+  if (!transfer) return null;
+
+  const files = transfer.fileIds.map((fileId) => getFileMetadata(fileId));
+  if (files.some((f) => !f || isFileExpired(f))) return null;
+
+  return files;
+}
+
 module.exports = {
   saveFileMetadata,
   getFileMetadata,
@@ -107,4 +176,7 @@ module.exports = {
   removeFileMetadata,
   isFileExpired,
   getSecureFilePath,
+  saveTransfer,
+  getTransfer,
+  getTransferFiles,
 };
