@@ -85,3 +85,8 @@ function buildDownloadUrl(fileId, protocol = "http") {
   const lanHost = getLocalIPAddress();
   return `${protocol}://${lanHost}:${PORT}/api/download/${fileId}`;
 }
+
+module.exports = {
+  getLocalIPAddress,
+  buildDownloadUrl,
+};
