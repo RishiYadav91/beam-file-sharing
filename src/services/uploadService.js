@@ -55,15 +55,25 @@ export async function uploadFiles(files, onProgress, signal) {
     }
 
     if (error.response) {
-      // Backend returned an error response (e.g. 400 Bad Request, 413 File Too Large)
-      const message = error.response.data?.message || "Upload failed due to a server error.";
+      // Backend returned an error response
+      const message =
+        error.response.data?.message ||
+        "Upload failed due to a server error.";
       throw new Error(message, { cause: error });
+
     } else if (error.request) {
-      // Request was made but no response received (Backend offline or network error)
-      throw new Error("Unable to connect to backend server. Please verify the server is running at http://localhost:8000.", { cause: error });
+      // Request was made but no response received
+      throw new Error(
+        "Unable to connect to the backend server. Please try again in a few moments.",
+        { cause: error }
+      );
+
     } else {
       // Something else triggered the error
-      throw new Error(error.message || "An unexpected error occurred during upload.", { cause: error });
+      throw new Error(
+        error.message || "An unexpected error occurred during upload.",
+        { cause: error }
+      );
     }
   }
 }
