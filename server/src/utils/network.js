@@ -5,7 +5,7 @@
  */
 
 const os = require("os");
-const { HOST, PORT } = require("../config/env");
+const { HOST, PORT, PUBLIC_BASE_URL } = require("../config/env");
 
 /**
  * Discovers the machine's primary local IPv4 LAN address.
@@ -78,11 +78,10 @@ function getLocalIPAddress(refresh = false) {
  * @returns {string} Fully qualified download URL.
  */
 function buildDownloadUrl(fileId, protocol = "http") {
+  if (PUBLIC_BASE_URL) {
+    return `${PUBLIC_BASE_URL}/api/download/${fileId}`;
+  }
+
   const lanHost = getLocalIPAddress();
   return `${protocol}://${lanHost}:${PORT}/api/download/${fileId}`;
 }
-
-module.exports = {
-  getLocalIPAddress,
-  buildDownloadUrl,
-};
